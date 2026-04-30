@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches Cargo.toml version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG_VER="${TAG_NAME#v}"
+          CARGO_VER="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          test -n "${CARGO_VER}"
+          if [[ "${TAG_VER}" != "${CARGO_VER}" ]]; then
+            echo "Tag '${TAG_NAME}' implies version '${TAG_VER}' but Cargo.toml has '${CARGO_VER}'"
+            exit 1
+          fi
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset_suffix: linux-x86_64
+            linker_package: ""
+            linker_bin: ""
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset_suffix: linux-aarch64
+            linker_package: gcc-aarch64-linux-gnu
+            linker_bin: aarch64-linux-gnu-gcc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset_suffix: macos-aarch64
+            linker_package: ""
+            linker_bin: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install AArch64 Linux linker
+        if: ${{ matrix.linker_package != '' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "${{ matrix.linker_package }}"
+
+      - name: Cargo linker config (AArch64 Linux)
+        if: ${{ matrix.linker_package != '' }}
+        run: |
+          mkdir -p .cargo
+          printf '[target.%s]\nlinker = "%s"\n' '${{ matrix.target }}' '${{ matrix.linker_bin }}' >> .cargo/config.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build dropserve
+        run: cargo build --locked --release --bin dropserve --target ${{ matrix.target }}
+
+      - name: Package archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          ARCHIVE="dropserve-${VERSION}-${{ matrix.asset_suffix }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czvf "${ARCHIVE}" dropserve
+          openssl dgst -sha256 -r "${ARCHIVE}" | awk '{ print $1 }' > "${ARCHIVE}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.asset_suffix }}
+          path: |
+            dropserve-*.tar.gz
+            dropserve-*.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: bundle-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
