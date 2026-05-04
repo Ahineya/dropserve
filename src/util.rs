@@ -26,8 +26,7 @@ pub fn default_home() -> PathBuf {
 fn domain_regex() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$|^[a-zA-Z0-9]$")
-            .expect("valid regex")
+        Regex::new(r"^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$|^[a-zA-Z0-9]$").expect("valid regex")
     })
 }
 
@@ -58,7 +57,9 @@ pub fn expand_home(path: &Path) -> PathBuf {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     }
     if let Ok(rest) = path.strip_prefix("~/") {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(rest);
+        return dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(rest);
     }
     path.to_path_buf()
 }
@@ -109,8 +110,8 @@ pub fn zip_directory(src_dir: &Path) -> Result<Vec<u8>> {
 }
 
 pub fn artifact_bytes(local_path: &Path) -> Result<Vec<u8>> {
-    let meta = fs::metadata(local_path)
-        .with_context(|| format!("stat {}", local_path.display()))?;
+    let meta =
+        fs::metadata(local_path).with_context(|| format!("stat {}", local_path.display()))?;
     if meta.is_dir() {
         zip_directory(local_path)
     } else if local_path.extension() == Some(OsStr::new("zip")) {
@@ -144,10 +145,7 @@ pub fn output_cmd(program: &str, args: &[&str]) -> Result<String> {
         .output()
         .with_context(|| format!("spawn {program}"))?;
     if !out.status.success() {
-        anyhow::bail!(
-            "{program} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("{program} failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }

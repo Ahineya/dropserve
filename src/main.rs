@@ -32,6 +32,12 @@ enum Commands {
         domain: String,
         /// Directory to zip, or an existing .zip file.
         path: PathBuf,
+        /// Run this site through a PocketBase service instead of static nginx.
+        #[arg(long)]
+        pocketbase: bool,
+        /// Localhost port for the PocketBase service.
+        #[arg(long, default_value_t = 8090)]
+        pb_port: u16,
     },
     /// Upload a new release and atomically switch `current`.
     Update {
@@ -40,19 +46,11 @@ enum Commands {
         path: PathBuf,
     },
     /// Remove nginx config and site directory (requires typing DELETE).
-    Delete {
-        user_host: String,
-        domain: String,
-    },
+    Delete { user_host: String, domain: String },
     /// List deployed sites on the remote host.
-    List {
-        user_host: String,
-    },
+    List { user_host: String },
     /// Point `current` symlink at the previous release.
-    Rollback {
-        user_host: String,
-        domain: String,
-    },
+    Rollback { user_host: String, domain: String },
     /// Prepare this machine: directories, dropserve.conf, nginx include, certbot/nginx checks.
     Serve {
         /// Dropserve home (default: ~/.dropserve or DROPSERVE_HOME).
@@ -74,14 +72,22 @@ enum RemoteCmd {
     Create {
         domain: String,
         artifact_zip: PathBuf,
+        #[arg(long)]
+        pocketbase: bool,
+        #[arg(long, default_value_t = 8090)]
+        pb_port: u16,
     },
     Update {
         domain: String,
         artifact_zip: PathBuf,
     },
-    Delete { domain: String },
+    Delete {
+        domain: String,
+    },
     List,
-    Rollback { domain: String },
+    Rollback {
+        domain: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -92,21 +98,19 @@ fn main() -> anyhow::Result<()> {
             user_host,
             domain,
             path,
-        } => client::create(&user_host, &domain, &path, cli.ssh_key)?,
+            pocketbase,
+            pb_port,
+        } => client::create(&user_host, &domain, &path, pocketbase, pb_port, cli.ssh_key)?,
         Commands::Update {
             user_host,
             domain,
             path,
         } => client::update(&user_host, &domain, &path, cli.ssh_key)?,
-        Commands::Delete {
-            user_host,
-            domain,
-        } => client::delete(&user_host, &domain, cli.ssh_key)?,
+        Commands::Delete { user_host, domain } => client::delete(&user_host, &domain, cli.ssh_key)?,
         Commands::List { user_host } => client::list_sites(&user_host, cli.ssh_key)?,
-        Commands::Rollback {
-            user_host,
-            domain,
-        } => client::rollback(&user_host, &domain, cli.ssh_key)?,
+        Commands::Rollback { user_host, domain } => {
+            client::rollback(&user_host, &domain, cli.ssh_key)?
+        }
         Commands::Serve {
             main_dir,
             nginx_conf,
@@ -117,7 +121,9 @@ fn main() -> anyhow::Result<()> {
                 RemoteCmd::Create {
                     domain,
                     artifact_zip,
-                } => remote::remote_create(&home, &domain, &artifact_zip)?,
+                    pocketbase,
+                    pb_port,
+                } => remote::remote_create(&home, &domain, &artifact_zip, pocketbase, pb_port)?,
                 RemoteCmd::Update {
                     domain,
                     artifact_zip,

@@ -88,12 +88,46 @@ Replace `deploy@host` with your **`SSH user@hostname-or-IP`**.
 | Command | What it does |
 |--------|----------------|
 | **`dropserve create deploy@host example.com ./dist`** | Zip `./dist` (or upload a `.zip` as-is), upload over SCP, extract release, write nginx snippet, reload nginx, wait until DNS **A** matches server public IP, run **certbot --nginx** |
+| **`dropserve create deploy@host example.com ./dist --pocketbase --pb-port 8090`** | Create a PocketBase-backed site: nginx proxies to a generated systemd service on `127.0.0.1:8090`; releases still use the same `current` symlink model |
 | **`dropserve update deploy@host example.com ./dist`** | New timestamped release + atomic flip of the **`current`** symlink |
 | **`dropserve delete deploy@host example.com`** | Prompts you to type **`DELETE`**, then removes vhost snippet and site directory |
-| **`dropserve list deploy@host`** | Lists sites and current release id |
+| **`dropserve list deploy@host`** | Lists sites, current release id, and deployment type |
 | **`dropserve rollback deploy@host example.com`** | Points **`current`** at the previous release |
 
 **Artifact:** `create` / `update` accept either a **directory** (zipped on the fly) or an existing **`.zip`** file.
+
+### PocketBase sites
+
+PocketBase support intentionally stays inside the same Dropserve loop:
+
+```bash
+dropserve create deploy@host app.example.com ./dist --pocketbase --pb-port 8090
+dropserve update deploy@host app.example.com ./dist
+dropserve rollback deploy@host app.example.com
+dropserve delete deploy@host app.example.com
+```
+
+Server requirements:
+
+- `pocketbase` must be installed on the server and available on `PATH`
+- the deploy user must be able to run `systemctl` directly or through `sudo`
+- choose a unique `--pb-port` per PocketBase-backed site
+
+Release conventions:
+
+- if the uploaded artifact already contains `pb_public/`, Dropserve leaves it in place
+- otherwise Dropserve moves the artifact contents into `pb_public/`
+- `pb_migrations/` is preserved when present and created empty otherwise
+- persistent data lives at `sites/<domain>/pb_data`
+
+Dropserve writes a small `sites/<domain>/dropserve-site.conf` file so later `update`, `rollback`, `delete`, and `list` know the site is PocketBase-backed. Updates and rollbacks restart the generated PocketBase service after flipping `current`.
+
+`dropserve list deploy@host` prints deployment type inline:
+
+```text
+example.com	current=20260504-120000	type=static
+app.example.com	current=20260504-121500	type=backend	backend=pocketbase	port=8090
+```
 
 ---
 
@@ -106,8 +140,12 @@ If main directory is `/var/www/dropserve`:
   dropserve.conf          # include nginx/*.conf
   nginx/
     example.com.conf      # generated server block (certbot may edit this)
+  systemd/
+    dropserve-example-com-pocketbase.service  # generated for PocketBase sites
   sites/
     example.com/
+      dropserve-site.conf # runtime metadata
+      pb_data/            # persistent PocketBase data when --pocketbase is used
       releases/
         YYYYMMDD-HHMMSS/
       current -> releases/…   # symlink; nginx root points here

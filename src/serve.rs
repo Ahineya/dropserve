@@ -22,13 +22,9 @@ pub fn run(main_dir: Option<PathBuf>, nginx_conf: Option<PathBuf>) -> Result<()>
     ensure_nginx_include(&nginx_conf, &home)?;
 
     let nginx = which("nginx").unwrap_or_else(|_| PathBuf::from("/usr/sbin/nginx"));
-    run_cmd(
-        nginx.to_str().unwrap_or("nginx"),
-        &["-t"],
-        true,
-    )
-    .or_else(|_| run_cmd("sudo", &[nginx.to_str().unwrap_or("nginx"), "-t"], true))
-    .context("nginx -t failed after updating configuration")?;
+    run_cmd(nginx.to_str().unwrap_or("nginx"), &["-t"], true)
+        .or_else(|_| run_cmd("sudo", &[nginx.to_str().unwrap_or("nginx"), "-t"], true))
+        .context("nginx -t failed after updating configuration")?;
 
     let home_display = fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
     if home_display.starts_with(Path::new("/root")) {
@@ -69,14 +65,18 @@ fn ensure_nginx_include(nginx_conf: &Path, home: &Path) -> Result<()> {
         anyhow::bail!("nginx config not found: {}", nginx_conf.display());
     }
 
-    let raw = fs::read_to_string(nginx_conf)
-        .with_context(|| format!("read {}", nginx_conf.display()))?;
+    let raw =
+        fs::read_to_string(nginx_conf).with_context(|| format!("read {}", nginx_conf.display()))?;
 
     let content = strip_prior_dropserve_http_include(&raw);
     let stripped_trailing_junk = content != raw;
 
-    let http_close = find_http_block_closing_brace(&content)
-        .ok_or_else(|| anyhow!("no `http {{ ... }}` block found in {}", nginx_conf.display()))?;
+    let http_close = find_http_block_closing_brace(&content).ok_or_else(|| {
+        anyhow!(
+            "no `http {{ ... }}` block found in {}",
+            nginx_conf.display()
+        )
+    })?;
 
     if dropserve_include_present_inside_http(&content, &include_line, http_close) {
         if stripped_trailing_junk {
@@ -202,7 +202,11 @@ fn find_http_block_closing_brace(content: &str) -> Option<usize> {
     matching_brace_close(content, open_brace)
 }
 
-fn dropserve_include_present_inside_http(content: &str, include_line: &str, http_close: usize) -> bool {
+fn dropserve_include_present_inside_http(
+    content: &str,
+    include_line: &str,
+    http_close: usize,
+) -> bool {
     content
         .find(include_line)
         .is_some_and(|pos| pos < http_close)
@@ -226,14 +230,13 @@ http {
         assert!(conf.as_bytes()[close] == b'}');
         let insert_pos = close;
         let include_line = "include /tmp/.dropserve/dropserve.conf;";
-        assert!(!dropserve_include_present_inside_http(conf, include_line, insert_pos));
+        assert!(!dropserve_include_present_inside_http(
+            conf,
+            include_line,
+            insert_pos
+        ));
         let insert = format!("\n\t{NGINX_MARKER}\n\t{include_line}\n");
-        let new_conf = format!(
-            "{}{}{}",
-            &conf[..insert_pos],
-            insert,
-            &conf[insert_pos..]
-        );
+        let new_conf = format!("{}{}{}", &conf[..insert_pos], insert, &conf[insert_pos..]);
         assert!(new_conf.contains("http {\n"));
         assert!(new_conf.contains(NGINX_MARKER));
         assert!(new_conf.lines().any(|l| l.contains("sites-enabled")));
@@ -243,7 +246,8 @@ http {
 
     #[test]
     fn strips_previous_stanza() {
-        let conf = "http {\n}\n# include added by dropserve\ninclude /root/.dropserve/dropserve.conf;\n";
+        let conf =
+            "http {\n}\n# include added by dropserve\ninclude /root/.dropserve/dropserve.conf;\n";
         let cleaned = strip_prior_dropserve_http_include(conf);
         assert!(!cleaned.contains("dropserve"));
         assert!(cleaned.contains("http"));

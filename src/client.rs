@@ -29,8 +29,18 @@ fn push_ssh_args(cmd: &mut std::process::Command, key: Option<&Path>) {
     }
 }
 
-pub fn create(user_host: &str, domain: &str, local: &Path, ssh_key: Option<PathBuf>) -> Result<()> {
+pub fn create(
+    user_host: &str,
+    domain: &str,
+    local: &Path,
+    pocketbase: bool,
+    pb_port: u16,
+    ssh_key: Option<PathBuf>,
+) -> Result<()> {
     validate_domain(domain)?;
+    if pocketbase && pb_port == 0 {
+        anyhow::bail!("--pb-port must be between 1 and 65535");
+    }
     let (user, host) = parse_user_host(user_host)?;
     let spec = format!("{user}@{host}");
     let key = ssh_key_from_opts(ssh_key)?;
@@ -54,7 +64,17 @@ pub fn create(user_host: &str, domain: &str, local: &Path, ssh_key: Option<PathB
 
     let mut ssh = std::process::Command::new("ssh");
     push_ssh_args(&mut ssh, key.as_deref());
-    ssh.arg(&spec).arg("dropserve").arg("remote").arg("create").arg(domain).arg(&remote_path);
+    ssh.arg(&spec)
+        .arg("dropserve")
+        .arg("remote")
+        .arg("create")
+        .arg(domain)
+        .arg(&remote_path);
+    if pocketbase {
+        ssh.arg("--pocketbase")
+            .arg("--pb-port")
+            .arg(pb_port.to_string());
+    }
     let st = ssh.status().context("spawn ssh")?;
     if !st.success() {
         anyhow::bail!("remote create failed with status {st}");
@@ -87,7 +107,12 @@ pub fn update(user_host: &str, domain: &str, local: &Path, ssh_key: Option<PathB
 
     let mut ssh = std::process::Command::new("ssh");
     push_ssh_args(&mut ssh, key.as_deref());
-    ssh.arg(&spec).arg("dropserve").arg("remote").arg("update").arg(domain).arg(&remote_path);
+    ssh.arg(&spec)
+        .arg("dropserve")
+        .arg("remote")
+        .arg("update")
+        .arg(domain)
+        .arg(&remote_path);
     let st = ssh.status().context("spawn ssh")?;
     if !st.success() {
         anyhow::bail!("remote update failed with status {st}");
