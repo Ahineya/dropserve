@@ -331,7 +331,12 @@ fn prepare_pocketbase_release(site: &Path, release_path: &Path) -> Result<()> {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == "pb_migrations" || name == "pb_public" || name == ".dropserve-pb_public" {
+        if name == "pb_migrations"
+            || name == "pb_public"
+            || name == "pb_hooks"
+            || name == "pb_data"
+            || name == ".dropserve-pb_public"
+        {
             continue;
         }
         fs::rename(entry.path(), tmp_public.join(name.as_ref()))
@@ -697,6 +702,31 @@ mod tests {
             }
             SiteRuntime::Static => panic!("expected pocketbase runtime"),
         }
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn pocketbase_release_keeps_pb_hooks_at_release_root() {
+        let home = test_dir("pb-hooks");
+        let site = home.join("sites").join("hooks.example.com");
+        let release = site.join("releases").join("20260504-110000");
+        fs::create_dir_all(release.join("assets")).unwrap();
+        fs::write(release.join("index.html"), "<h1>app</h1>").unwrap();
+        fs::create_dir_all(release.join("pb_hooks")).unwrap();
+        fs::write(release.join("pb_hooks").join("main.pb.js"), "hook").unwrap();
+
+        prepare_pocketbase_release(&site, &release).unwrap();
+
+        assert!(
+            release.join("pb_hooks").join("main.pb.js").is_file(),
+            "pb_hooks must stay beside pb_public for PocketBase default --hooksDir"
+        );
+        assert!(
+            !release.join("pb_public").join("pb_hooks").exists(),
+            "pb_hooks must not be nested under pb_public"
+        );
+        assert!(release.join("pb_public").join("index.html").is_file());
 
         let _ = fs::remove_dir_all(home);
     }
